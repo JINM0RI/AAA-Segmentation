@@ -1,0 +1,137 @@
+from pathlib import Path
+
+import cv2
+import numpy as np
+import torch
+
+from config import DEVICE, IMAGE_SIZE, PREDICTIONS_DIR
+from models.hybrid_model import HybridAAASegmentation
+from utils.preprocessing import refine_segmentation
+
+
+VALID_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+
+
+def _load_input_image(image_path: Path, image_size: int) -> torch.Tensor:
+	image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+	if image is None:
+		raise ValueError(f"Could not load image: {image_path}")
+
+	image = cv2.resize(image, (image_size, image_size), interpolation=cv2.INTER_AREA)
+	image = image.astype(np.float32) / 255.0
+	tensor = torch.from_numpy(image).unsqueeze(0).unsqueeze(0)
+	return tensor
+
+
+def _save_visualizations(
+	image_tensor: torch.Tensor,
+	binary_mask: np.ndarray,
+	base_name: str,
+	vis_dir: Path,
+) -> None:
+	"""Optionally save original CT slice, binary mask, and red overlay preview."""
+	original_dir = vis_dir / "original"
+	mask_dir = vis_dir / "mask"
+	overlay_dir = vis_dir / "overlay"
+	original_dir.mkdir(parents=True, exist_ok=True)
+	mask_dir.mkdir(parents=True, exist_ok=True)
+	overlay_dir.mkdir(parents=True, exist_ok=True)
+
+	# Recover the input slice from normalized tensor and convert to uint8 grayscale.
+	image_uint8 = (image_tensor.squeeze().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+	cv2.imwrite(str(original_dir / f"{base_name}.png"), image_uint8)
+	cv2.imwrite(str(mask_dir / f"{base_name}_mask.png"), binary_mask)
+
+	# Medical-style overlay: aneurysm region in semi-transparent red.
+	image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_GRAY2BGR)
+	red_layer = np.zeros_like(image_bgr)
+	red_layer[:, :, 2] = 255
+	mask_bool = binary_mask > 0
+	alpha = 0.4
+	overlay = image_bgr.copy()
+	overlay[mask_bool] = cv2.addWeighted(
+		image_bgr[mask_bool],
+		1.0 - alpha,
+		red_layer[mask_bool],
+		alpha,
+		0,
+	)
+	cv2.imwrite(str(overlay_dir / f"{base_name}_overlay.png"), overlay)
+
+
+def _collect_input_images(input_path: Path) -> list[Path]:
+	if input_path.is_file():
+		return [input_path]
+
+	if input_path.is_dir():
+		files = [
+			p
+			for p in input_path.iterdir()
+			if p.is_file() and p.suffix.lower() in VALID_EXTENSIONS
+		]
+		files.sort()
+		return files
+
+	raise ValueError(f"Input path does not exist: {input_path}")
+
+
+def run_inference(
+	input_path: str | Path,
+	model_path: str | Path,
+	output_dir: str | Path = PREDICTIONS_DIR,
+	save_visualizations: bool = False,
+	vis_dir: str | Path | None = None,
+) -> list[Path]:
+	input_path = Path(input_path)
+	model_path = Path(model_path)
+	output_dir = Path(output_dir)
+	output_dir.mkdir(parents=True, exist_ok=True)
+
+	if vis_dir is None:
+		vis_dir = output_dir / "visualizations"
+	else:
+		vis_dir = Path(vis_dir)
+
+	if not model_path.exists():
+		raise FileNotFoundError(f"Model file not found: {model_path}")
+
+	model = HybridAAASegmentation(image_size=IMAGE_SIZE).to(DEVICE)
+	state_dict = torch.load(model_path, map_location=DEVICE)
+	model.load_state_dict(state_dict)
+	model.eval()
+
+	input_images = _collect_input_images(input_path)
+	if not input_images:
+		raise ValueError("No valid PNG/JPG images found for inference.")
+
+	saved_files: list[Path] = []
+	with torch.no_grad():
+		for image_file in input_images:
+			tensor = _load_input_image(image_file, IMAGE_SIZE).to(DEVICE)
+			pred = model(tensor)
+
+			# Ensure valid probability map if a model variant emits logits.
+			if pred.min().item() < 0.0 or pred.max().item() > 1.0:
+				pred = torch.sigmoid(pred)
+
+			# Refine with morphology, largest component, boundary smoothing, and hole filling.
+			pred_mask = refine_segmentation(
+				pred.squeeze(0).squeeze(0),
+				threshold=0.35,
+				kernel_size=(5, 5),
+			)
+
+			output_file = output_dir / f"{image_file.stem}_pred.png"
+			cv2.imwrite(str(output_file), pred_mask)
+			saved_files.append(output_file)
+
+			if save_visualizations:
+				_save_visualizations(
+					image_tensor=tensor,
+					binary_mask=pred_mask,
+					base_name=image_file.stem,
+					vis_dir=vis_dir,
+				)
+
+	return saved_files
+
