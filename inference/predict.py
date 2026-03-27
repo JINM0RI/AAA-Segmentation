@@ -4,7 +4,15 @@ import cv2
 import numpy as np
 import torch
 
-from config import DEVICE, IMAGE_SIZE, PREDICTIONS_DIR
+from config import (
+	BASE_CHANNELS,
+	DEVICE,
+	IMAGE_SIZE,
+	MODELS_DIR,
+	POSTPROCESS_KERNEL_SIZE,
+	PREDICTIONS_DIR,
+	PRED_THRESHOLD,
+)
 from models.hybrid_model import HybridAAASegmentation
 from utils.preprocessing import refine_segmentation
 
@@ -79,6 +87,8 @@ def run_inference(
 	input_path: str | Path,
 	model_path: str | Path,
 	output_dir: str | Path = PREDICTIONS_DIR,
+	threshold: float = PRED_THRESHOLD,
+	kernel_size: tuple[int, int] = POSTPROCESS_KERNEL_SIZE,
 	save_visualizations: bool = False,
 	vis_dir: str | Path | None = None,
 ) -> list[Path]:
@@ -92,11 +102,16 @@ def run_inference(
 	else:
 		vis_dir = Path(vis_dir)
 
+	if not model_path.is_absolute() and not model_path.exists():
+		candidate = MODELS_DIR / model_path
+		if candidate.exists():
+			model_path = candidate
+
 	if not model_path.exists():
 		raise FileNotFoundError(f"Model file not found: {model_path}")
 
-	model = HybridAAASegmentation(image_size=IMAGE_SIZE).to(DEVICE)
-	state_dict = torch.load(model_path, map_location=DEVICE)
+	model = HybridAAASegmentation(image_size=IMAGE_SIZE, base_channels=BASE_CHANNELS).to(DEVICE)
+	state_dict = torch.load(model_path, map_location=DEVICE, weights_only=True)
 	model.load_state_dict(state_dict)
 	model.eval()
 
@@ -117,8 +132,8 @@ def run_inference(
 			# Refine with morphology, largest component, boundary smoothing, and hole filling.
 			pred_mask = refine_segmentation(
 				pred.squeeze(0).squeeze(0),
-				threshold=0.35,
-				kernel_size=(5, 5),
+				threshold=threshold,
+				kernel_size=kernel_size,
 			)
 
 			output_file = output_dir / f"{image_file.stem}_pred.png"
