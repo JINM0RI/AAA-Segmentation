@@ -94,7 +94,7 @@ def _run_threshold_sweep(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(
-		description="AAA Segmentation using Hybrid Residual Attention U-Net + Swin Transformer",
+		description="AA Segmentation using Hybrid Residual Attention U-Net + Swin Transformer",
 	)
 	mode_group = parser.add_mutually_exclusive_group(required=True)
 	mode_group.add_argument("--train", action="store_true", help="Train the segmentation model")

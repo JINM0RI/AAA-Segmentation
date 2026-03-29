@@ -1,6 +1,6 @@
-# AAA-Segmentation
+# AA-Segmentation
 
-Hybrid Residual Attention U-Net + Swin Transformer for Abdominal Aortic Aneurysm (AAA) segmentation from 2D CT slices.
+Hybrid Residual Attention U-Net + Swin Transformer for Abdominal Aorta (AA) segmentation from 2D CT slices.
 
 ## Project Overview
 

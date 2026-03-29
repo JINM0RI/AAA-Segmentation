@@ -18,14 +18,14 @@ PLOTS_DIR = OUTPUTS_DIR / "plots"
 IMAGE_SIZE = 512
 BASE_CHANNELS = 24
 BATCH_SIZE = 4
-EPOCHS = 50
+EPOCHS = 40
 LR = 1e-4
 TRAIN_SPLIT = 0.8
 RANDOM_STATE = 42
 NUM_WORKERS = 2
 
 # Inference/post-processing defaults. Tune threshold for precision-recall trade-off.
-PRED_THRESHOLD = 0.35
+PRED_THRESHOLD = 0.95
 POSTPROCESS_KERNEL_SIZE = (5, 5)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

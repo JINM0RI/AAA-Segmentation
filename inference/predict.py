@@ -40,30 +40,36 @@ def _save_visualizations(
 	"""Optionally save original CT slice, binary mask, and red overlay preview."""
 	original_dir = vis_dir / "original"
 	mask_dir = vis_dir / "mask"
+	mask_binary_dir = vis_dir / "mask_binary"
 	overlay_dir = vis_dir / "overlay"
 	original_dir.mkdir(parents=True, exist_ok=True)
 	mask_dir.mkdir(parents=True, exist_ok=True)
+	mask_binary_dir.mkdir(parents=True, exist_ok=True)
 	overlay_dir.mkdir(parents=True, exist_ok=True)
 
 	# Recover the input slice from normalized tensor and convert to uint8 grayscale.
 	image_uint8 = (image_tensor.squeeze().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
 	cv2.imwrite(str(original_dir / f"{base_name}.png"), image_uint8)
-	cv2.imwrite(str(mask_dir / f"{base_name}_mask.png"), binary_mask)
 
-	# Medical-style overlay: aneurysm region in semi-transparent red.
+	# Save a binary mask copy for reproducibility/debugging.
+	cv2.imwrite(str(mask_binary_dir / f"{base_name}_mask_binary.png"), binary_mask)
+
+	# Save a red mask image so the segmented region is directly visible.
+	mask_red = np.zeros((binary_mask.shape[0], binary_mask.shape[1], 3), dtype=np.uint8)
+	mask_red[:, :, 2] = binary_mask
+	cv2.imwrite(str(mask_dir / f"{base_name}_mask.png"), mask_red)
+
+	# Visualization-only overlay for highlighted segmented region.
+	# This does not feed back into prediction or saved binary mask generation.
 	image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_GRAY2BGR)
 	red_layer = np.zeros_like(image_bgr)
 	red_layer[:, :, 2] = 255
-	mask_bool = binary_mask > 0
 	alpha = 0.4
 	overlay = image_bgr.copy()
-	overlay[mask_bool] = cv2.addWeighted(
-		image_bgr[mask_bool],
-		1.0 - alpha,
-		red_layer[mask_bool],
-		alpha,
-		0,
-	)
+	blended = cv2.addWeighted(image_bgr, 1.0 - alpha, red_layer, alpha, 0)
+	mask_bool = binary_mask > 0
+	if mask_bool.any():
+		overlay[mask_bool] = blended[mask_bool]
 	cv2.imwrite(str(overlay_dir / f"{base_name}_overlay.png"), overlay)
 
 
