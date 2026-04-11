@@ -69,7 +69,7 @@ class AAASegmentationDataset(Dataset):
 		mask = (mask > 127).astype(np.float32)
 
 		if self.transform is not None:
-			# Albumentations expects named inputs and applies identical spatial ops to mask.
+			
 			transformed = self.transform(image=image, mask=mask)
 			image, mask = transformed["image"], transformed["mask"]
 
